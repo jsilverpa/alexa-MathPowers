@@ -1,6 +1,7 @@
 /**
- You may not use this file except in compliance with the License.  This file is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
+ This file is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
  */
+
 
 'use strict';
 
@@ -121,7 +122,7 @@ function onSessionEnded(sessionEndedRequest, session) {
 
 var GAME_LENGTH = 1;
 var GAME_DIGITS = 2;
-var GAME_TOTAL_QUESTIONS = 2 /* 5 */;
+var GAME_TOTAL_QUESTIONS = 5;
 var CARD_TITLE = "Trivia"; // Be sure to change this for your skill.
 
 function generateNextQuestion(questionNumber) {
@@ -139,7 +140,7 @@ function getWelcomeResponse(callback) {
     console.log("Start of getWelcomeResonse.");
     var sessionAttributes = {},
     
-        speechOutput = "Let us begin.  I will ask you a " + GAME_DIGITS.toString()
+        speechOutput = "Let's begin.  I will ask you a " + GAME_DIGITS.toString()
             + " digit number which you will have to square.  ";
     var quest = generateNextQuestion(1);        
   
@@ -301,3 +302,4 @@ function buildResponse(sessionAttributes, speechletResponse) {
         response: speechletResponse
     };
 }
+
