@@ -1,5 +1,3 @@
-/**
- This file is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
  */
 
 
@@ -105,6 +103,11 @@ function onIntent(intentRequest, session, callback) {
     }
 }
 
+//return the pluralized word (assume it just needs to add an 's' :-)
+function pluralize(word, count) {
+    if (count === 1) return word;
+    return word + "s";
+}
 
 /**
  * Called when the user ends the session.
@@ -120,13 +123,15 @@ function onSessionEnded(sessionEndedRequest, session) {
 // ------- Skill specific business logic -------
 
 
-var GAME_LENGTH = 1;
-var GAME_DIGITS = 2;
-var GAME_TOTAL_QUESTIONS = 5;
-var CARD_TITLE = "Trivia"; // Be sure to change this for your skill.
 
-function generateNextQuestion(questionNumber) {
-    var baseNumber = Math.floor(Math.random() * 9 * Math.pow(10,GAME_DIGITS-1) + Math.pow(10,GAME_DIGITS-1)),
+var GAME_START_DIGITS = 1;
+var GAME_TOTAL_QUESTIONS = 5;
+var PASS_RATE = 0.7;
+var CARD_TITLE = "Education"; // Be sure to change this for your skill.
+var SUCCESS_SOUND = "https://s3-us-west-2.amazonaws.com/jsilver-alexa-games/alexa_success_48kbps.mp3";
+var FAIL_SOUND = "https://s3-us-west-2.amazonaws.com/jsilver-alexa-games/alexa_fail_48kbps.mp3";
+function generateNextQuestion(questionNumber, dig) {
+    var baseNumber = Math.floor(Math.random() * 9 * Math.pow(10,dig-1) + Math.pow(10,dig-1)),
         repromptText = "What is " + baseNumber + " squared?",
         spokenQuestion = "Question " + questionNumber + ". "+ repromptText + " ";
     return {
@@ -140,9 +145,9 @@ function getWelcomeResponse(callback) {
     console.log("Start of getWelcomeResonse.");
     var sessionAttributes = {},
     
-        speechOutput = "Let's begin.  I will ask you a " + GAME_DIGITS.toString()
+        speechOutput = "Let's begin.  I will ask you a " + GAME_START_DIGITS.toString()
             + " digit number which you will have to square.  ";
-    var quest = generateNextQuestion(1);        
+    var quest = generateNextQuestion(1, GAME_START_DIGITS);        
   
     speechOutput += quest.spokenQuestion;
     var start = new Date();
@@ -151,7 +156,11 @@ function getWelcomeResponse(callback) {
         "baseNumber": quest.baseNumber,
         "questionAskTime" : start.getTime(),
         "questionNumber" : 1,
-        "score": 0
+        "dig" : 1,
+        "score": 0,
+        "scoreThisRound": 0,
+        "speechOutput" : speechOutput, //used when user asks for help or repeat
+        "repromptText" : quest.repromptText  //see above
     };
     callback(sessionAttributes,
         buildSpeechletResponse(CARD_TITLE, speechOutput, quest.repromptText, false));
@@ -169,52 +178,58 @@ function handleAnswerRequest(intent, session, callback) {
         userAnswer = parseInt(intent.slots.Answer.value);
     var baseNumber = parseInt(session.attributes.baseNumber);
     var currentScore = parseInt(session.attributes.score);
+    var scoreThisRound = parseInt(session.attributes.scoreThisRound);
     var questionNumber = parseInt(session.attributes.questionNumber);
+    var dig = parseInt(session.attributes.dig);
     console.log("In AnswerRequest, baseNumber is "+baseNumber);
     if (userAnswer === (baseNumber * baseNumber)) {
         //correct answer
         speechOutput = "That is correct.";
         var endTime = new Date();
-        var timeTaken = (endTime.getTime() - session.attributes.questionAskTime)/1000 - 5 /* hack.  it takes 5 seconds to read the question */;
-        var points = Math.max(Math.ceil(Math.pow(10, GAME_DIGITS) - timeTaken), 1);
-        speechOutput += " You took " + Math.floor(timeTaken) + " seconds.  You gained " + points + " points." ;
+        var timeTaken = Math.max(Math.floor((endTime.getTime() - session.attributes.questionAskTime)/1000 - 10),1); /* hack.  it takes 10 seconds to read the question */
+        var points = Math.max(Math.ceil(Math.pow(10, dig) - timeTaken),4*dig+3);
+        speechOutput += " You took " + timeTaken + pluralize(" second",timeTaken) +".  You gained " + points + pluralize(" point", points) + "." ;
         currentScore += points;
-        
+        scoreThisRound += points;
     }
     else {
-        speechOutput = "That is incorrect.  You answered " + userAnswer + ".  The correct answer is " + baseNumber * baseNumber + ".";
+        speechOutput = "That is incorrect.  You answered " + userAnswer + ".  The correct answer to " + baseNumber + " squared is " + baseNumber * baseNumber + ".";
     }
-    var lastQuestion = false;
-    if (questionNumber===GAME_TOTAL_QUESTIONS) lastQuestion = true;
-    speechOutput += " Your ";
-    if (lastQuestion) speechOutput +=" final ";
-    else speechOutput += " total ";
-    speechOutput += "score after " + questionNumber + " ";
-    if (questionNumber===1) speechOutput += "question ";
-    else speechOutput += "questions ";
-    speechOutput += " is " + currentScore + ". ";
-    
+    var lastQuestionThisRound = (questionNumber % GAME_TOTAL_QUESTIONS === 0);
+
+    speechOutput += " Your total score after "+ questionNumber + pluralize(" question",questionNumber) + " is " + currentScore + ". ";
+ 
     var quest;   
-    if (lastQuestion) {
-        speechOutput += "Thank you for playing.";
-        callback(session.attributes,
-            buildSpeechletResponseWithoutCard(speechOutput, "", true));
+    if (lastQuestionThisRound) {
+        if (scoreThisRound >= GAME_TOTAL_QUESTIONS * PASS_RATE * Math.pow(10, dig)) {
+            //level up
+            speechOutput += "<audio src='" + SUCCESS_SOUND + "'/>" + "Congratulations.  You have passed "+ dig + " digit squaring.  Let's move on to squaring " + (dig+1) + " digit numbers. ";
+            dig++;
+        }
+        else {
+            speechOutput += "<audio src='" + FAIL_SOUND + "'/>" + "Sorry.   You need more practice squaring " + dig + " digit numbers.  Let's try that again. ";
+        }
+        scoreThisRound = 0;
+        questionNumber = 0;
     }
-    else {
-        //not the last question 
-        quest = generateNextQuestion(questionNumber+1);
-        var start = new Date();
-        speechOutput += quest.spokenQuestion;
-        sessionAttributes = {
-            "baseNumber": quest.baseNumber,
-            "questionAskTime" : start.getTime(),
-            "questionNumber" : questionNumber+1,
-            "score": currentScore
-        };
-        callback(sessionAttributes,
-            buildSpeechletResponse(CARD_TITLE, speechOutput, quest.repromptText, lastQuestion));
-    }
+
+    quest = generateNextQuestion(questionNumber+1,dig);
+    var start = new Date();
+    speechOutput += quest.spokenQuestion;
+    sessionAttributes = {
+        "baseNumber": quest.baseNumber,
+        "questionAskTime" : start.getTime(),
+        "questionNumber" : questionNumber+1,
+        "dig" : dig,
+        "score": currentScore,
+        "scoreThisRound" : scoreThisRound,
+        "speechOutput" : speechOutput,  //used when user asks for help or requests more time
+        "repromptText" : quest.repromptText  //see above line
+    };
+    callback(sessionAttributes,
+        buildSpeechletResponse(CARD_TITLE, speechOutput, quest.repromptText, false));
 }
+
 
 function handleRepeatRequest(intent, session, callback) {
     // Repeat the previous speechOutput and repromptText from the session attributes if available
@@ -223,7 +238,7 @@ function handleRepeatRequest(intent, session, callback) {
         getWelcomeResponse(callback);
     } else {
         callback(session.attributes,
-            buildSpeechletResponseWithoutCard(session.attributes.speechOutput, session.attributes.repromptText, false));
+            buildSpeechletResponseWithoutCard(session.attributes.repromptText, session.attributes.repromptText, false));
     }
 }
 
@@ -241,9 +256,15 @@ function handleGetHelpRequest(intent, session, callback) {
 
     // Do not edit the help dialogue. This has been created by the Alexa team to demonstrate best practices.
 
-    var speechOutput = "",
-        repromptText = "";
+    var speechOutput = "You are being asked to square numbers.  You should respond with the answer.  For example, say, the answer is sixteen.  Or, you can just say, sixteen.  " 
+           + " If you do well at one level, you will advance to the next level. "
+           + " If you don't hear the question, or you need more time, say, repeat.   To start a new game at any time, say, start game. "
+             + "Would you like to keep playing?",
+        repromptText = "To give an answer to a question, say, the answer is sixteen.  Or, just say, sixteen. . "
+        + "Would you like to keep playing?";
         var shouldEndSession = false;
+  
+  
     callback(session.attributes,
         buildSpeechletResponseWithoutCard(speechOutput, repromptText, shouldEndSession));
 }
@@ -260,14 +281,18 @@ function handleFinishSessionRequest(intent, session, callback) {
 
 function buildSpeechletResponse(title, output, repromptText, shouldEndSession) {
     return {
-        outputSpeech: {
+        /* outputSpeech: {
             type: "PlainText",
             text: output
+        }, */
+         outputSpeech: {
+            ssml: "<speak>" + output + "</speak>",
+            type: "SSML"
         },
         card: {
             type: "Simple",
             title: title,
-            content: output
+            content: repromptText
         },
         reprompt: {
             outputSpeech: {
@@ -295,6 +320,8 @@ function buildSpeechletResponseWithoutCard(output, repromptText, shouldEndSessio
     };
 }
 
+
+
 function buildResponse(sessionAttributes, speechletResponse) {
     return {
         version: "1.0",
@@ -302,4 +329,3 @@ function buildResponse(sessionAttributes, speechletResponse) {
         response: speechletResponse
     };
 }
-
